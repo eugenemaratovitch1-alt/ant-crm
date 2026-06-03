@@ -827,43 +827,31 @@ async function syncAllClients(){
 }
 async function syncToSupabase(){
   try{
-    // Синхронизируем всех клиентов у которых есть chat_id (нужны для кабинета)
-    const withChat=clients.filter(c=>c.clientChatId);
-    if(withChat.length){
-      const rows=withChat.map(c=>({
-        id:c.id,
-        name:c.name,
-        phone:c.phone||'',
-        addr:c.addr||'',
-        stage:c.stage,
-        sum:c.sum||0,
-        service_name:c.serviceName||'',
-        planned_date:c.plannedDate||null,
-        planned_time:c.plannedTime||null,
-        negotiations:c.negotiations||'',
-        steps:c.steps||{},
-        photos:c.photos||[],
-        passport:c.passport||{},
-        history:(c.history||[]).slice(-20),
-        temp:c.temp||'normal',
-        client_chat_id:c.clientChatId,
-        updated_at:new Date().toISOString()
-      }));
-      await sbUpsert('clients2',rows);
-    }
-    // Все остальные — только базовые данные для бэкапа
-    const all=clients.map(c=>({
+    // Синхронизируем ВСЕХ клиентов в clients2 (кабинет работает по ?id= без chat_id)
+    const rows=clients.map(c=>({
       id:c.id,
       name:c.name,
       phone:c.phone||'',
       addr:c.addr||'',
+      email:c.email||'',
       stage:c.stage,
       sum:c.sum||0,
+      service_name:c.serviceName||'',
+      planned_date:c.plannedDate||null,
+      planned_time:c.plannedTime||null,
+      negotiations:c.negotiations||'',
+      steps:c.steps||{},
+      photos:(c.photos||[]).slice(0,10),
+      passport:c.passport||{},
+      history:(c.history||[]).slice(-20),
       temp:c.temp||'normal',
       client_chat_id:c.clientChatId||null,
       updated_at:new Date().toISOString()
     }));
-    await sbUpsert('clients_meta',all);
+    // Батчами по 20 чтобы не превысить лимит
+    for(let i=0;i<rows.length;i+=20){
+      await sbUpsert('clients2',rows.slice(i,i+20));
+    }
   }catch(e){}
 }
 function saveMyTasks(){localStorage.setItem('ant_my_tasks',JSON.stringify(myTasks))}
