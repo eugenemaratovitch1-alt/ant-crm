@@ -185,8 +185,7 @@ footer{height:70px}
       </div>
       <div class="hdr-actions">
         <span id="syncStatus" style="font-size:9px;color:var(--muted)"></span>
-        <button class="ico-btn" onclick="manualSave()" title="Сохранить в облако">💾</button>
-        <button class="ico-btn" onclick="cloudLoad().then(()=>render())" title="Загрузить из облака">🔄</button>
+        <button class="ico-btn" onclick="syncAllClients()" title="Синхронизировать всех клиентов в кабинет">☁️</button>
         <button class="btn-fab" onclick="openAdd()">+</button>
       </div>
     </div>
@@ -778,6 +777,54 @@ function saveClients(){
   saveClients._timer=setTimeout(()=>syncToSupabase(),2000);
 }
 
+async function syncAllClients(){
+  const btn=document.querySelector('[onclick="syncAllClients()"]');
+  if(btn){btn.textContent='⏳';btn.disabled=true;}
+  showSync('Синхронизация...');
+  try{
+    // Все клиенты → clients_meta
+    const meta=clients.map(c=>({
+      id:c.id,name:c.name,phone:c.phone||'',addr:c.addr||'',
+      stage:c.stage,sum:c.sum||0,temp:c.temp||'normal',
+      client_chat_id:c.clientChatId||null,
+      updated_at:new Date().toISOString()
+    }));
+    await sbUpsert('clients_meta',meta);
+
+    // Клиенты с chat_id или email → clients2 (для кабинета)
+    // Синхронизируем ВСЕХ чтобы кабинет работал по ?id=
+    const full=clients.map(c=>({
+      id:c.id,name:c.name,phone:c.phone||'',addr:c.addr||'',
+      email:c.email||'',stage:c.stage,sum:c.sum||0,
+      service_name:c.serviceName||'',
+      planned_date:c.plannedDate||null,
+      planned_time:c.plannedTime||null,
+      negotiations:c.negotiations||'',
+      steps:c.steps||{},
+      photos:(c.photos||[]).slice(0,10),
+      passport:c.passport||{},
+      history:(c.history||[]).slice(-20),
+      temp:c.temp||'normal',
+      client_chat_id:c.clientChatId||null,
+      updated_at:new Date().toISOString()
+    }));
+
+    // Отправляем батчами по 50
+    for(let i=0;i<full.length;i+=50){
+      await sbUpsert('clients2',full.slice(i,i+50));
+    }
+
+    showSync('✅ '+clients.length+' клиентов');
+    setTimeout(()=>showSync(''),3000);
+    toast('✅ Все '+clients.length+' клиентов синхронизированы в облако');
+  }catch(e){
+    showSync('❌ Ошибка');
+    setTimeout(()=>showSync(''),3000);
+    toast('Ошибка синхронизации','err');
+  }finally{
+    if(btn){btn.textContent='☁️';btn.disabled=false;}
+  }
+}
 async function syncToSupabase(){
   try{
     // Синхронизируем всех клиентов у которых есть chat_id (нужны для кабинета)
