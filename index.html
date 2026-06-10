@@ -1005,10 +1005,10 @@ function renderClient(c){
   const brigShare=c.sum?c.sum-myShare:0;
 
   // Этапы воронки (без Отказа — отдельная кнопка)
-  const stagePills=STAGES.filter(s=>s.id!=='refused').map(s=>{
-    const a=c.stage===s.id;
-    return '<button class="sp'+(a?' active':'')+'" style="'+(a?'background:'+s.bg+';color:'+s.txt+';border-color:'+s.color:'')+'" class="stagePillBtn" data-sid="'+s.id+'">'+s.name+'</button>';
-  }).join('')+'<button class="sp'+(c.stage==='refused'?' active':'')+'" style="'+(c.stage==='refused'?'background:#fef2f2;color:#dc2626;border-color:#dc2626':'')+'" class="stagePillBtn" data-sid="refused">❌ Отказ</button>';
+ const stagePills = STAGES.filter(s => s.id !== 'refused').map(s => {
+    const active = (c.stage === s.id);
+    return `<button class="sp stagePillBtn ${active ? 'active' : ''}" data-sid="${s.id}" style="${active ? `background:${s.bg};color:${s.txt};border-color:${s.color}` : ''}">${s.name}</button>`;
+}).join('') + `<button class="sp stagePillBtn ${c.stage === 'refused' ? 'active' : ''}" data-sid="refused" style="${c.stage === 'refused' ? 'background:#fef2f2;color:#dc2626;border-color:#dc2626' : ''}">❌ Отказ</button>`;
 
   // Этапы работ на объекте (5 шагов)
   const doneCount=Object.values(c.steps||{}).filter(Boolean).length;
