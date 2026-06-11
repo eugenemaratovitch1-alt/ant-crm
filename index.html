@@ -768,7 +768,16 @@ let calYear=new Date().getFullYear(), calMonth=new Date().getMonth();
 let calSelected=today();
 let smetaRows=[];
 let matItems=[];
-
+let clients=JSON.parse(localStorage.getItem('ant_clients2')||'[]');
+clients.forEach(c=>{if(c.stage==='thinking')c.stage='estimate';if(c.stage==='contract')c.stage='planned';});
+let myTasks=JSON.parse(localStorage.getItem('ant_my_tasks')||'[]');
+let currentClientId=null;
+let addTempVal='normal';
+let calYear=new Date().getFullYear(), calMonth=new Date().getMonth();
+let calSelected=today();
+let smetaRows=[];
+let matItems=[];
+let activeSignals = new Set(); // 👈 ДОБАВЬТЕ ЭТУ СТРОКУ
 function saveClients(){
   localStorage.setItem('ant_clients2',JSON.stringify(clients));
   clearTimeout(saveClients._timer);
