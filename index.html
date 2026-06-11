@@ -878,22 +878,85 @@ if(localStorage.getItem('ant_auth2')==='1'){
   startApp();
 }
 
-async function startApp(){
-  // Сначала грузим из localStorage для быстрого старта
-  const local=localStorage.getItem('ant_clients2');
-  if(local){try{const p=JSON.parse(local);if(p.length>0){clients=p;render()}}catch(e){}}
-  const localT=localStorage.getItem('ant_my_tasks');
-  if(localT){try{myTasks=JSON.parse(localT)}catch(e){}}
-
-  // Затем синхронизируем из Telegram (может быть новее)
-  const loaded=await cloudLoad();
-  if(!loaded && clients.length===0){
-    // Если совсем ничего нет — показываем демо
+  async function loadFromSupabase() {
+  try {
+    const { data, error } = await supabaseClient
+      .from('clients2')
+      .select('*');
+    if (error) throw error;
+    if (data && data.length > 0) {
+      // Преобразуем поля, чтобы соответствовали структуре clients
+      const loaded = data.map(c => ({
+        id: c.id,
+        name: c.name,
+        phone: c.phone || '',
+        addr: c.addr || '',
+        email: c.email || '',
+        stage: c.stage,
+        sum: c.sum || 0,
+        serviceName: c.service_name,
+        plannedDate: c.planned_date,
+        plannedTime: c.planned_time,
+        negotiations: c.negotiations,
+        steps: c.steps || {},
+        photos: c.photos || [],
+        passport: c.passport || {},
+        history: c.history || [],
+        temp: c.temp || 'normal',
+        clientChatId: c.client_chat_id,
+        tasks: (c.tasks || []), // если есть, иначе []
+        source: c.source || 'call',
+        notes: c.notes || '',
+        aiCard: c.aiCard || null,
+        created: c.created || Date.now()
+      }));
+      clients = loaded;
+      localStorage.setItem('ant_clients2', JSON.stringify(clients));
+      showSync('✓ Загружено из облака (' + clients.length + ' кл.)');
+      setTimeout(() => showSync(''), 3000);
+      return true;
+    }
+    return false;
+  } catch (e) {
+    console.error('loadFromSupabase error', e);
+    return false;
+  }
+}
+  
+async function startApp() {
+  // Сначала пробуем загрузить из Supabase (облако)
+  const loadedFromCloud = await loadFromSupabase();
+  
+  // Если из облака ничего не загрузилось, пробуем из localStorage
+  if (!loadedFromCloud) {
+    const local = localStorage.getItem('ant_clients2');
+    if (local) {
+      try {
+        const p = JSON.parse(local);
+        if (p.length > 0) {
+          clients = p;
+          showSync('✓ Локальные данные');
+          setTimeout(() => showSync(''), 2000);
+        }
+      } catch(e) {}
+    }
+  }
+  
+  // Загружаем задачи
+  const localT = localStorage.getItem('ant_my_tasks');
+  if (localT) {
+    try {
+      myTasks = JSON.parse(localT);
+    } catch(e) {}
+  }
+  
+  // Если всё равно клиентов нет — показываем демо
+  if (clients.length === 0) {
     initDemo();
   }
+  
   render();
 }
-
 function initDemo(){
   if(clients.length>0) return;
   const now=new Date().toLocaleString('ru');
@@ -1918,6 +1981,7 @@ async function notifyClient(){
 // ═══ SUPABASE ═══
 const SB_URL='https://xlrsfuhjwdcfxshaofrv.supabase.co';
 const SB_KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhscnNmdWhqd2RjZnhzaGFvZnJ2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzk5NDg3MjcsImV4cCI6MjA5NTUyNDcyN30.xmnVlOEogkDZNwJmG61OW-6daiuCUihMPeJ0es7Du9s';
+const supabaseClient = window.supabase.createClient(SB_URL, SB_KEY);
 async function sbUpsert(t,d){try{const a=Array.isArray(d)?d:[d];await fetch(SB_URL+'/rest/v1/'+t,{method:'POST',headers:{apikey:SB_KEY,Authorization:'Bearer '+SB_KEY,'Content-Type':'application/json','Prefer':'resolution=merge-duplicates'},body:JSON.stringify(a)});}catch(e){}}
 async function sbDelete(t,id){try{await fetch(SB_URL+'/rest/v1/'+t+'?id=eq.'+id,{method:'DELETE',headers:{apikey:SB_KEY,Authorization:'Bearer '+SB_KEY}});}catch(e){}}
 
