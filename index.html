@@ -771,8 +771,6 @@ let matItems=[];
 
 function saveClients(){
   localStorage.setItem('ant_clients2',JSON.stringify(clients));
-  // Синхронизируем в Supabase — только клиентов с chat_id (для кабинета)
-  // и последние изменённые (дебаунс 2 сек чтобы не спамить)
   clearTimeout(saveClients._timer);
   saveClients._timer=setTimeout(()=>syncToSupabase(),2000);
 }
@@ -782,7 +780,6 @@ async function syncAllClients(){
   if(btn){btn.textContent='⏳';btn.disabled=true;}
   showSync('Синхронизация...');
   try{
-    // Все клиенты → clients_meta
     const meta=clients.map(c=>({
       id:c.id,name:c.name,phone:c.phone||'',addr:c.addr||'',
       stage:c.stage,sum:c.sum||0,temp:c.temp||'normal',
@@ -791,8 +788,6 @@ async function syncAllClients(){
     }));
     await sbUpsert('clients_meta',meta);
 
-    // Клиенты с chat_id или email → clients2 (для кабинета)
-    // Синхронизируем ВСЕХ чтобы кабинет работал по ?id=
     const full=clients.map(c=>({
       id:c.id,name:c.name,phone:c.phone||'',addr:c.addr||'',
       email:c.email||'',stage:c.stage,sum:c.sum||0,
@@ -809,7 +804,6 @@ async function syncAllClients(){
       updated_at:new Date().toISOString()
     }));
 
-    // Отправляем батчами по 50
     for(let i=0;i<full.length;i+=50){
       await sbUpsert('clients2',full.slice(i,i+50));
     }
@@ -827,7 +821,6 @@ async function syncAllClients(){
 }
 async function syncToSupabase(){
   try{
-    // Синхронизируем ВСЕХ клиентов в clients2 (кабинет работает по ?id= без chat_id)
     const rows=clients.map(c=>({
       id:c.id,
       name:c.name,
@@ -848,7 +841,6 @@ async function syncToSupabase(){
       client_chat_id:c.clientChatId||null,
       updated_at:new Date().toISOString()
     }));
-    // Батчами по 20 чтобы не превысить лимит
     for(let i=0;i<rows.length;i+=20){
       await sbUpsert('clients2',rows.slice(i,i+20));
     }
@@ -878,14 +870,18 @@ if(localStorage.getItem('ant_auth2')==='1'){
   startApp();
 }
 
-  async function loadFromSupabase() {
+// ═══ SUPABASE ═══
+const SB_URL='https://xlrsfuhjwdcfxshaofrv.supabase.co';
+const SB_KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhscnNmdWhqd2RjZnhzaGFvZnJ2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzk5NDg3MjcsImV4cCI6MjA5NTUyNDcyN30.xmnVlOEogkDZNwJmG61OW-6daiuCUihMPeJ0es7Du9s';
+const supabaseClient = window.supabase.createClient(SB_URL, SB_KEY);
+
+async function loadFromSupabase() {
   try {
     const { data, error } = await supabaseClient
       .from('clients2')
       .select('*');
     if (error) throw error;
     if (data && data.length > 0) {
-      // Преобразуем поля, чтобы соответствовали структуре clients
       const loaded = data.map(c => ({
         id: c.id,
         name: c.name,
@@ -904,7 +900,7 @@ if(localStorage.getItem('ant_auth2')==='1'){
         history: c.history || [],
         temp: c.temp || 'normal',
         clientChatId: c.client_chat_id,
-        tasks: (c.tasks || []), // если есть, иначе []
+        tasks: c.tasks || [],
         source: c.source || 'call',
         notes: c.notes || '',
         aiCard: c.aiCard || null,
@@ -922,12 +918,9 @@ if(localStorage.getItem('ant_auth2')==='1'){
     return false;
   }
 }
-  
+
 async function startApp() {
-  // Сначала пробуем загрузить из Supabase (облако)
   const loadedFromCloud = await loadFromSupabase();
-  
-  // Если из облака ничего не загрузилось, пробуем из localStorage
   if (!loadedFromCloud) {
     const local = localStorage.getItem('ant_clients2');
     if (local) {
@@ -941,20 +934,15 @@ async function startApp() {
       } catch(e) {}
     }
   }
-  
-  // Загружаем задачи
   const localT = localStorage.getItem('ant_my_tasks');
   if (localT) {
     try {
       myTasks = JSON.parse(localT);
     } catch(e) {}
   }
-  
-  // Если всё равно клиентов нет — показываем демо
   if (clients.length === 0) {
     initDemo();
   }
-  
   render();
 }
 function initDemo(){
@@ -991,7 +979,6 @@ function render(){
   document.getElementById('st-tasks').textContent=ov;
   document.getElementById('st-sum').textContent=sum>0?fmt(sum)+'₽':'—';
   const order=['new','montage','planned','estimate','measure','done','refused'];
-  // Миграция старых этапов перед сортировкой
   let needSave=false;
   clients.forEach(c=>{
     if(c.stage==='thinking'){c.stage='estimate';needSave=true;}
@@ -1017,8 +1004,6 @@ function render(){
   sorted.filter(c=>c.stage!=='refused').forEach(c=>{
     const st=STAGES.find(s=>s.id===c.stage)||STAGES[0];
     if(c.stage!==lastStage){
-      // Заголовок секции — только текст без эмодзи
-      const stLabel=st.name.replace(/^\p{Emoji}\s*/u,'');
       html+='<div class="sec-lbl">'+st.name+'</div>';
       lastStage=c.stage;
     }
@@ -1033,12 +1018,10 @@ function render(){
       const ico=isOv?'⚠️':isTd?'🔔':'📌';
       chip='<div class="c-task" style="color:'+clr+'">'+ico+' '+nt.text+(nt.date?' · '+nt.date:'')+'</div>';
     }
-    // Источник — убираем undefined
     const srcLabel=c.phone?c.phone:(SRC[c.source]&&SRC[c.source]!=='undefined'?SRC[c.source]:'—');
     const meta=srcLabel+(c.addr?' · '+c.addr:'');
     html+='<div class="c-card '+(c.temp||'normal')+'" onclick="openClient(\''+c.id+'\')"><div class="c-avatar" style="background:'+abg+';color:'+atx+'">'+SICONS[c.stage]+'</div><div class="c-body"><div class="c-name">'+c.name+'</div><div class="c-meta">'+meta+'</div>'+chip+'</div><div class="c-right"><div style="font-size:17px">'+ti+'</div><div class="stage-badge" style="background:'+st.bg+';color:'+st.txt+'">'+st.name+'</div>'+(c.sum?'<div class="c-sum">'+fmt(c.sum)+'₽</div>':'')+'</div></div>';
   });
-  // Отказники — свёрнуто внизу
   const refused=sorted.filter(c=>c.stage==='refused');
   if(refused.length){
     html+='<div style="margin-top:6px"><button onclick="var d=document.getElementById(\'refList\');d.style.display=d.style.display===\'none\'?\'block\':\'none\'" style="width:100%;padding:9px;background:var(--bg);border:1px solid var(--border);border-radius:9px;font-size:12px;font-weight:700;cursor:pointer;color:var(--muted);text-align:left">❌ Отказы — '+refused.length+' клиент'+(refused.length===1?'':refused.length<5?'а':'ов')+' ▾</button><div id="refList" style="display:none;margin-top:5px">';
@@ -1067,13 +1050,11 @@ function renderClient(c){
   const myShare=c.sum?Math.round(c.sum*BRIGADE_COMMISSION/100):0;
   const brigShare=c.sum?c.sum-myShare:0;
 
-  // Этапы воронки (без Отказа — отдельная кнопка)
  const stagePills = STAGES.filter(s => s.id !== 'refused').map(s => {
     const active = (c.stage === s.id);
     return `<button class="sp stagePillBtn ${active ? 'active' : ''}" data-sid="${s.id}" style="${active ? `background:${s.bg};color:${s.txt};border-color:${s.color}` : ''}">${s.name}</button>`;
 }).join('') + `<button class="sp stagePillBtn ${c.stage === 'refused' ? 'active' : ''}" data-sid="refused" style="${c.stage === 'refused' ? 'background:#fef2f2;color:#dc2626;border-color:#dc2626' : ''}">❌ Отказ</button>`;
 
-  // Этапы работ на объекте (5 шагов)
   const doneCount=Object.values(c.steps||{}).filter(Boolean).length;
   const stepsRow=STEPS.map(s=>{
     const d=!!(c.steps&&c.steps[s.id]);
@@ -1085,21 +1066,17 @@ function renderClient(c){
       +'</div>';
   }).join('');
 
-  // Задачи
   const tasks=(c.tasks||[]).map((t,i)=>'<div class="task-item"><div class="task-cb'+(t.done?' done':'')+'" onclick="toggleTask('+i+')"></div><div style="flex:1"><div style="font-size:12px;font-weight:600;'+(t.done?'text-decoration:line-through;color:var(--muted)':'')+'">'+t.text+'</div>'+(t.date?'<div style="font-size:10px;color:var(--muted)">'+(t.time?t.time+' · ':'')+t.date+'</div>':'')+'</div><button onclick="removeTask('+i+')" style="background:none;border:none;color:var(--hint);font-size:14px;cursor:pointer">×</button></div>').join('')||'<div style="font-size:11px;color:var(--muted)">Задач нет</div>';
 
-  // История — лог + история вместе
   const allHist=[...(c.history||[]),...(c.log||[]).map(l=>({text:'📞 '+l.text,time:l.time,color:'#0891b2'}))].sort((a,b)=>{try{return new Date(b.time)-new Date(a.time)}catch(e){return 0}}).slice(0,15);
   const hist=allHist.map(h=>'<div class="hist-item"><div class="hist-dot" style="background:'+(h.color||'#94a3b8')+'"></div><div style="flex:1"><div class="hist-text">'+h.text+'</div><div class="hist-time">'+h.time+'</div></div></div>').join('');
 
-  // Фото
   const photosHtml=(c.photos||[]).length===0
     ?'<div style="text-align:center;padding:14px;color:var(--muted);font-size:12px">Фото пока нет</div>'
     :(c.photos||[]).map((p,i)=>'<div style="position:relative;aspect-ratio:1;border-radius:9px;overflow:hidden;background:var(--bg)"><img src="'+p.url+'" style="width:100%;height:100%;object-fit:cover" class="photoCell" data-pi="'+i+'"><button onclick="removePhoto('+i+')" style="position:absolute;top:3px;right:3px;width:18px;height:18px;background:rgba(0,0,0,.5);border:none;border-radius:50%;color:#fff;font-size:11px;cursor:pointer">×</button><div style="position:absolute;bottom:0;left:0;right:0;background:linear-gradient(transparent,rgba(0,0,0,.6));padding:3px 5px"><div style="font-size:9px;color:#fff">'+(p.caption||'')+'</div></div></div>').join('');
 
   document.getElementById('cpBody').innerHTML=
 
-  // ── 1. ШАПКА ─────────────────────────────────────
   '<div class="sec">'
   +'<div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">'
   +'<div style="width:44px;height:44px;border-radius:11px;background:'+abg+';color:'+atx+';display:flex;align-items:center;justify-content:center;font-size:20px;flex-shrink:0">'+SICONS[c.stage]+'</div>'
@@ -1113,20 +1090,17 @@ function renderClient(c){
   +'</div></div>'
   +'<button onclick="toggleEdit()" id="editBtn" style="width:32px;height:32px;background:var(--bg);border:1px solid var(--border);border-radius:8px;font-size:14px;cursor:pointer;flex-shrink:0">✏️</button>'
   +'</div>'
-  // Температура
   +'<div class="temp-row" style="margin-bottom:10px">'
   +'<button class="temp-btn '+(c.temp==="vip"?"ah":"")+' tempBtn" data-tmp="vip">💎 VIP</button>'
   +'<button class="temp-btn '+(c.temp==="regular"?"aw":"")+' tempBtn" data-tmp="regular">⭐ Постоянный</button>'
   +'<button class="temp-btn '+(!c.temp||c.temp==="normal"?"ac":"")+' tempBtn" data-tmp="normal">🆕 Обычный</button>'
   +'</div>'
-  // Контакт
   +'<div style="display:flex;align-items:center;gap:6px;margin-bottom:6px">'
   +'<div style="flex:1;background:var(--bg);border-radius:9px;padding:9px 11px;font-size:13px;font-weight:700">'+(c.phone||'<span style="color:var(--hint)">Телефон не указан</span>')+'</div>'
   +(c.phone?'<a href="tel:'+c.phone+'" style="width:38px;height:38px;background:var(--green-l);border:1.5px solid #bbf7d0;border-radius:9px;display:flex;align-items:center;justify-content:center;font-size:18px;text-decoration:none">📞</a>':'')
   +(c.phone?'<a href="https://wa.me/'+c.phone.replace(/\D/g,'')+'" target="_blank" style="width:38px;height:38px;background:var(--green-l);border:1.5px solid #bbf7d0;border-radius:9px;display:flex;align-items:center;justify-content:center;font-size:18px;text-decoration:none">💬</a>':'')
   +'</div>'
   +(c.addr?'<button class="addrMapBtn" data-addr="'+c.addr+'" style="width:100%;padding:8px;background:var(--bg);border:1px solid var(--border);border-radius:8px;font-family:\'Nunito\',sans-serif;font-size:11px;font-weight:700;cursor:pointer;color:var(--muted)">🗺️ '+c.addr+'</button>':'')
-  // Редактирование
   +'<div id="contactEdit" style="display:none;margin-top:10px;padding-top:10px;border-top:1px solid var(--border)">'
   +'<div class="fw"><label>Имя</label><input type="text" class="fi" id="eName" value="'+c.name+'"></div>'
   +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">'
@@ -1141,29 +1115,22 @@ function renderClient(c){
   +'</div>'
   +'</div>'
 
-  // ── 2. ЭТАП ВОРОНКИ ──────────────────────────────
   +'<div class="sec"><div class="sec-title">Этап воронки</div><div class="stage-pills">'+stagePills+'</div></div>'
 
-  // ── 3. ЗАМЕТКИ ИЗ РАЗГОВОРА ──────────────────────
   +(c.notes?'<div class="sec"><div class="sec-title">📝 Заметки</div><div style="font-size:12px;color:var(--text);line-height:1.7;white-space:pre-wrap;background:var(--bg);border-radius:8px;padding:10px 12px">'+c.notes+'</div></div>':'')
 
-  // ── 4. ПАСПОРТ ОБЪЕКТА ───────────────────────────
   +'<div class="sec"><div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px"><div class="sec-title" style="margin:0">🏗 Паспорт объекта</div><button class="openPassportBtn" style="padding:4px 10px;background:var(--blue-l);border:1px solid var(--blue-m);border-radius:7px;font-size:11px;font-weight:700;cursor:pointer;color:var(--blue)">✏️ Заполнить</button></div><div id="passportBlock">'+renderPassportBlock(c)+'</div></div>'
 
-  // ── 5. ФИНАНСЫ ───────────────────────────────────
   +(c.sum?'<div class="sec"><div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px">'
   +'<div style="background:var(--blue-l);border-radius:10px;padding:10px;text-align:center"><div style="font-size:9px;color:var(--muted);margin-bottom:2px">Стоимость</div><div style="font-size:15px;font-weight:800;color:var(--blue)">'+fmt(c.sum)+'₽</div></div>'
   +'<div style="background:var(--green-l);border-radius:10px;padding:10px;text-align:center"><div style="font-size:9px;color:var(--muted);margin-bottom:2px">Вам '+BRIGADE_COMMISSION+'%</div><div style="font-size:15px;font-weight:800;color:var(--green)">'+fmt(myShare)+'₽</div></div>'
   +'<div style="background:#fff7ed;border-radius:10px;padding:10px;text-align:center"><div style="font-size:9px;color:var(--muted);margin-bottom:2px">Бригаде</div><div style="font-size:15px;font-weight:800;color:var(--orange)">'+fmt(brigShare)+'₽</div></div>'
   +'</div></div>':'')
 
-  // ── 6. ДЕТАЛИ ЗАКАЗА ────────────────────────────
   +'<div class="sec"><div class="sec-title">🔧 Детали заказа</div><textarea class="fi" id="negotiationsInput" onblur="saveNeg()" rows="3" placeholder="Нюансы объекта, договорённости...">'+(c.negotiations||'')+'</textarea></div>'
 
-  // ── 6.1. РЕКОМЕНДАЦИИ КЛИЕНТУ ──────────────────────
   +'<div class="sec"><div class="sec-title">💡 Рекомендации клиенту (видны в кабинете)</div><textarea class="fi" id="recommendationsInput" onblur="saveRecommendations()" rows="2" placeholder="Что порекомендовать клиенту...">'+(c.recommendations||'')+'</textarea></div>'  
-  
-  // ── 7. ЗАКАЗЧИК ──────────────────────────────────
+
   +'<div class="sec"><div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:9px"><div class="sec-title" style="margin:0">🏠 Заказчик</div>'
   +(c.clientChatId?'<span style="font-size:10px;font-weight:700;color:var(--green);background:var(--green-l);border-radius:20px;padding:2px 8px">✅ Telegram</span>':'<span style="font-size:10px;color:var(--muted)">Telegram не привязан</span>')
   +'</div><div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">'
@@ -1171,7 +1138,6 @@ function renderClient(c){
   +'<button onclick="openSmetaEditor()" style="padding:12px;background:var(--blue-l);border:1.5px solid var(--blue-m);border-radius:9px;font-size:12px;font-weight:700;cursor:pointer;color:var(--blue)">📊 Смета</button>'
   +'</div></div>'
 
-  // ── 8. БРИГАДА ───────────────────────────────────
   +'<div class="sec"><div class="sec-title">👷 Бригада</div>'
   +'<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-bottom:10px">'
   +'<button onclick="openBrigadeOverlay()" style="padding:11px 4px;background:#fff7ed;border:1.5px solid #fed7aa;border-radius:9px;font-size:11px;font-weight:700;cursor:pointer;color:var(--orange)">📋 Задание</button>'
@@ -1182,33 +1148,25 @@ function renderClient(c){
   +'<div style="font-size:10px;color:var(--muted);text-align:right">'+doneCount+'/'+STEPS.length+' этапов выполнено</div>'
   +'</div>'
 
-  // ── 9. ЗАДАЧИ ────────────────────────────────────
   +'<div class="sec"><div class="sec-title">✅ Задачи</div><div id="taskList">'+tasks+'</div>'
   +'<div class="add-row" style="margin-top:8px"><input type="text" class="add-inp" id="taskText" placeholder="Задача..."><input type="date" class="add-inp" id="taskDate" style="width:120px"><button class="btn-blue" onclick="addTask()">+</button></div></div>'
 
-  // ── 10. ФОТО ─────────────────────────────────────
   +'<div class="sec"><div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px"><div class="sec-title" style="margin:0">📷 Фото объекта</div><label style="padding:5px 11px;background:var(--blue);border-radius:8px;color:#fff;font-size:11px;font-weight:800;cursor:pointer">+ Фото<input type="file" accept="image/*" multiple onchange="uploadPhotos(event)" style="display:none"></label></div><div style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px">'+photosHtml+'</div></div>'
 
-  // ── 11. ДОПРОДАЖИ ────────────────────────────────
   +'<div class="sec"><div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px"><div class="sec-title" style="margin:0">💡 Допродажи</div><button onclick="addUpsellItem()" style="padding:4px 10px;background:#f5f3ff;border:1px solid #e9d5ff;border-radius:7px;font-size:11px;font-weight:700;cursor:pointer;color:#7c3aed">+ Добавить</button></div><div id="upsellItems">'+renderUpsellItems(c)+'</div></div>'
 
-  // ── 12. AI-АНАЛИЗ ────────────────────────────────
   +'<div id="aiCardBlock" style="margin-bottom:9px"></div>'
 
-  // ── 13. ИСТОРИЯ И ЗВОНКИ ─────────────────────────
   +'<div class="sec"><div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px"><div class="sec-title" style="margin:0">🕐 История</div><div style="display:flex;gap:5px"><input type="text" class="add-inp" id="logText" placeholder="Итог звонка..." style="font-size:11px;padding:5px 8px"><button class="btn-blue" onclick="addLog()" style="padding:5px 10px">+</button></div></div><div style="max-height:220px;overflow-y:auto">'+(hist||'<div style="font-size:11px;color:var(--muted)">Пока пусто</div>')+'</div></div>'
 
-  // ── 14. УДАЛИТЬ ──────────────────────────────────
   +'<button class="btn-red-soft" style="width:100%;margin-top:4px" onclick="deleteClient()">🗑 Удалить лида</button>';
 
-  // AI блок
   const _ab=document.getElementById('aiCardBlock');
   if(_ab){
     if(c.aiCard)setTimeout(()=>renderAICard(c),50);
     else _ab.innerHTML='<div style="background:var(--bg);border-radius:10px;padding:11px;display:flex;align-items:center;justify-content:space-between"><div style="font-size:12px;color:var(--muted)">🤖 AI-анализ не запущен</div><button data-pid="'+c.id+'" onclick="analyzeLeadAI(this.dataset.pid)" style="padding:6px 12px;background:var(--blue);border:none;border-radius:8px;color:#fff;font-size:11px;font-weight:700;cursor:pointer">Анализировать</button></div>';
   }
 
-  // Подставить значение рекомендаций после рендера
   const recField = document.getElementById('recommendationsInput');
   if(recField && c.recommendations) recField.value = c.recommendations;
 }
@@ -1240,7 +1198,6 @@ function toggleStep(sid){
   const c=clients.find(x=>x.id===currentClientId);if(!c)return;
   if(!c.steps)c.steps={};
   const step=STEPS.find(x=>x.id===sid);
-  // Требование фото перед отметкой
   if(step&&step.req==='photo'&&!c.steps[sid]){
     if(!(c.photos&&c.photos.length)){
       toast(step.warn||'Добавьте фото!','err');
@@ -1250,7 +1207,6 @@ function toggleStep(sid){
   c.steps[sid]=!c.steps[sid];
   if(c.steps[sid]&&step){
     c.history.push({text:'✓ '+step.text,time:new Date().toLocaleString('ru'),color:'#16a34a'});
-    // Уведомление бригаде при сдаче
     if(sid==='closed')tg(BRIGADE_CHAT,'✅ ОБЪЕКТ СДАН\n\n👤 '+c.name+'\nОтличная работа!');
   }
   saveClients();renderClient(c);
@@ -1270,7 +1226,6 @@ function addTask(){
   c.tasks.push({text,date,done:false});
   c.history.push({text:'Задача: '+text,time:new Date().toLocaleString('ru'),color:'#d97706'});
   saveClients(); renderClient(c);
-  // Уведомление бригаде
   const msg='📌 *Задача по объекту*\n\n'
     +'👤 '+c.name+'\n'
     +'📍 '+(c.addr||'—')+'\n'
@@ -1447,16 +1402,13 @@ function closeAdd(){document.getElementById('addOverlay').classList.remove('open
 function addClient(){
   const name=document.getElementById('aName').value.trim();
   if(!name){document.getElementById('addErr').style.display='block';return;}
-  // Сигналы
   const signals=Array.from(activeSignals);
   const signalLabels={brick:'кирпич/газобетон',wood:'дерево/каркас',big:'большой дом 200м²+',village:'посёлок/КП',busy:'некогда самому',ref:'по рекомендации',noprice:'не спросил цену',cheap:'сразу торгуется'};
   const signalsText=signals.map(s=>signalLabels[s]||s).join(', ');
-  // Услуга
   const svcEl=document.getElementById('aService');
   const svcVal=svcEl?svcEl.value:'';
   const svcNames={drain:'Водостоки',roof:'Кровля',snow:'Снегозадержатели',facade:'Фасад',clean:'Чистка',landscape:'Благоустройство',plumbing:'Сантехника',electric:'Электрика',to:'Регулярное ТО',complex:'Комплекс'};
   const svcName=svcNames[svcVal]||'';
-  // Заметки + сигналы
   const rawNote=document.getElementById('aNote').value.trim();
   const fullNote=rawNote+(svcName?'\nЧто нужно: '+svcName:'')+(signalsText?'\nСигналы: '+signalsText:'');
   const c={
@@ -1478,17 +1430,14 @@ function addClient(){
   saveClients();
   closeAdd();
   render();
-  // Сбрасываем форму
   ['aName','aPhone','aNote','aSum'].forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});
   const sv=document.getElementById('aService');if(sv)sv.value='';
   activeSignals.clear();
   document.querySelectorAll('#paySignalsGrid .sp').forEach(b=>{b.style.background='';b.style.color='';b.style.borderColor='';});
   addTempVal='normal';
   setAddTemp('normal');
-  // Уведомление
   const sigStr=signalsText?' · '+signalsText:'';
   tg(MY_CHAT,'🆕 *Новый лид*\n'+name+(c.phone?' · '+c.phone:'')+'\n'+(SRC[c.source]||'')+sigStr+(svcName?' · '+svcName:''));
-  // Автоматически запускаем AI-анализ
   if(typeof analyzeLeadAI==='function') setTimeout(()=>analyzeLeadAI(c.id),300);
 }
 
@@ -1576,7 +1525,6 @@ function renderDayTasksList(ds){
     });
   }
   document.getElementById('dayTasksList').innerHTML=html;
-  // Вешаем обработчики
   document.querySelectorAll('.myTaskCb').forEach(el=>el.addEventListener('click',()=>toggleMyTaskDay(el.dataset.id,el.dataset.ds)));
   document.querySelectorAll('.myTaskMove').forEach(el=>el.addEventListener('click',()=>moveTask(el.dataset.id,el.dataset.ds)));
   document.querySelectorAll('.myTaskDel').forEach(el=>el.addEventListener('click',()=>deleteMyTaskDay(el.dataset.id,el.dataset.ds)));
@@ -1664,33 +1612,23 @@ function renderStats(){
   const now=new Date(),m=now.getMonth(),y=now.getFullYear();
   const td=today();
   const GOAL=1000000;
-
-  // Данные из финансового модуля — чистый доход
   const monthKey=y+'-'+(m+1);
   const incomes=(moneyData.incomes||[]).filter(i=>i.month===monthKey);
   const netIncome=incomes.reduce((a,i)=>a+i.amount,0);
   const expenses=(moneyData.expenses||[]).reduce((a,e)=>a+e.amount,0);
-  const netClean=netIncome-expenses; // чистыми после расходов
-
-  // Воронка
+  const netClean=netIncome-expenses;
   const active=clients.filter(c=>c.stage!=='done'&&c.stage!=='refused');
   const pipeline=active.reduce((a,c)=>a+(c.sum||0),0);
   const closedM=clients.filter(c=>c.stage==='done'&&c.sum>0);
   const closedCount=closedM.length;
-
-  // Прогресс к цели (по чистому доходу)
   const goalPct=Math.min(100,Math.round(netClean/GOAL*100));
   const goalClr=goalPct>=100?'var(--green)':goalPct>=60?'var(--blue)':goalPct>=30?'var(--amber)':'var(--red)';
-
-  // Просроченные задачи
   const ovTasks=[];
   clients.forEach(c=>{
     (c.tasks||[]).filter(t=>!t.done&&t.date&&t.date<td).forEach(t=>{
       ovTasks.push({client:c.name,task:t.text,date:t.date});
     });
   });
-
-  // Воронка бары
   const stageOrder=['new','measure','estimate','planned','montage','done'];
   const stageRows=STAGES.filter(s=>stageOrder.includes(s.id)&&s.id!=='refused').map(s=>{
     const cnt=clients.filter(c=>c.stage===s.id).length;
@@ -1699,19 +1637,14 @@ function renderStats(){
     const pct=Math.round(cnt/max*100);
     return {s,cnt,sum,pct};
   }).filter(x=>x.cnt>0||x.s.id==='new');
-
-  // Источники
   const srcC={};
   clients.forEach(c=>{if(c.source)srcC[c.source]=(srcC[c.source]||0)+1;});
   const maxSrc=Math.max(...Object.values(srcC),1);
   const srcRows=Object.entries(SRC).filter(([k])=>srcC[k]).sort((a,b)=>(srcC[b[0]]||0)-(srcC[a[0]]||0));
-
-  // Ближайшие монтажи
   const planned=clients.filter(c=>c.stage==='planned'&&c.plannedDate).sort((a,b)=>a.plannedDate<b.plannedDate?-1:1).slice(0,5);
 
   document.getElementById('statsList').innerHTML=
 
-  // ── 4 метрики ──
   '<div style="display:grid;grid-template-columns:repeat(2,1fr);gap:7px;margin-bottom:9px">'
   +'<div style="background:var(--white);border:1px solid var(--border);border-radius:12px;padding:12px">'
   +'<div style="font-size:10px;color:var(--muted);margin-bottom:3px;text-transform:uppercase;letter-spacing:.4px">Чистый доход</div>'
@@ -1734,7 +1667,6 @@ function renderStats(){
   +'<div style="font-size:10px;color:var(--muted)">всего объектов</div></div>'
   +'</div>'
 
-  // ── Цель месяца ──
   +'<div style="background:var(--white);border:1px solid var(--border);border-radius:12px;padding:13px;margin-bottom:9px">'
   +'<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">'
   +'<div><div style="font-size:13px;font-weight:800">🎯 Цель месяца — 1 000 000 ₽ чистыми</div>'
@@ -1747,14 +1679,12 @@ function renderStats(){
   +(netClean<GOAL?'<span style="font-size:11px;font-weight:700;color:'+goalClr+'">осталось '+fmt(GOAL-netClean)+'₽</span>':'<span style="font-size:11px;font-weight:700;color:var(--green)">🎉 Цель достигнута!</span>')
   +'</div></div>'
 
-  // ── Просроченные задачи ──
   +(ovTasks.length?'<div style="background:var(--red-l);border:1.5px solid #fecaca;border-radius:12px;padding:12px;margin-bottom:9px">'
   +'<div style="font-size:12px;font-weight:800;color:var(--red);margin-bottom:7px">⚠️ Просроченные задачи — '+ovTasks.length+'</div>'
   +ovTasks.slice(0,4).map(t=>'<div style="display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:1px solid #fecaca;font-size:12px"><span style="font-weight:700;color:var(--text)">'+t.client+'</span><span style="flex:1;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+t.task+'</span><span style="color:var(--red);font-weight:700;flex-shrink:0">'+t.date+'</span></div>').join('')
   +(ovTasks.length>4?'<div style="font-size:11px;color:var(--red);margin-top:5px">и ещё '+(ovTasks.length-4)+'...</div>':'')
   +'</div>':'')
 
-  // ── Воронка ──
   +'<div style="background:var(--white);border:1px solid var(--border);border-radius:12px;padding:13px;margin-bottom:9px">'
   +'<div style="font-size:11px;font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:.4px;margin-bottom:10px">Воронка</div>'
   +stageRows.map(({s,cnt,sum,pct})=>'<div style="display:flex;align-items:center;gap:8px;padding:7px 0;border-bottom:1px solid var(--border)">'
@@ -1765,7 +1695,6 @@ function renderStats(){
   +'</div></div>').join('')
   +'</div>'
 
-  // ── Ближайшие монтажи ──
   +(planned.length?'<div style="background:var(--white);border:1px solid var(--border);border-radius:12px;padding:13px;margin-bottom:9px">'
   +'<div style="font-size:11px;font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:.4px;margin-bottom:10px">📅 Ближайшие монтажи</div>'
   +planned.map(c=>{
@@ -1783,7 +1712,6 @@ function renderStats(){
   }).join('')
   +'</div>':'')
 
-  // ── Источники ──
   +(srcRows.length?'<div style="background:var(--white);border:1px solid var(--border);border-radius:12px;padding:13px;margin-bottom:9px">'
   +'<div style="font-size:11px;font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:.4px;margin-bottom:10px">Источники лидов</div>'
   +srcRows.map(([k,v])=>'<div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--border)">'
@@ -1813,7 +1741,7 @@ function renderSmetaEditor(){
   document.getElementById('smetaBody').innerHTML=
     '<div style="background:var(--white);border-radius:11px;padding:11px;margin-bottom:8px"><div style="font-size:13px;font-weight:800">'+(c.name||'Клиент')+(c.addr?' · '+c.addr:'')+'</div><div style="display:flex;gap:5px;margin-top:8px;flex-wrap:wrap"><button onclick="addSRow(\'work\')" style="padding:6px 10px;background:var(--green-l);border:1px solid #bbf7d0;border-radius:7px;font-family:\'Nunito\',sans-serif;font-size:11px;font-weight:700;color:var(--green);cursor:pointer">+ Работа</button><button onclick="addSRow(\'mat\')" style="padding:6px 10px;background:var(--blue-l);border:1px solid var(--blue-m);border-radius:7px;font-family:\'Nunito\',sans-serif;font-size:11px;font-weight:700;color:var(--blue);cursor:pointer">+ Материал</button><button onclick="addSRow(\'deliv\')" style="padding:6px 10px;background:var(--amber-l);border:1px solid #fde68a;border-radius:7px;font-family:\'Nunito\',sans-serif;font-size:11px;font-weight:700;color:var(--amber);cursor:pointer">+ Доставка</button></div></div>'
     +'<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;min-width:560px;background:var(--white);border-radius:11px;overflow:hidden"><tr style="background:var(--bg)"><th style="padding:7px;font-size:10px;color:var(--muted);text-align:left;font-weight:700">Наименование</th><th style="padding:7px;font-size:10px;color:var(--muted);font-weight:700;width:45px">Ед.</th><th style="padding:7px;font-size:10px;color:var(--muted);font-weight:700;width:50px">Кол.</th><th style="padding:7px;font-size:10px;color:var(--muted);font-weight:700;width:70px;text-align:right">Цена</th><th style="padding:7px;font-size:10px;color:var(--muted);font-weight:700;width:70px;text-align:right">Сумма</th><th style="width:26px"></th><tr>'
-    +smetaRows.map((r,i)=>'<tr style="border-top:1px solid var(--border)"><td style="padding:5px 7px"><input value="'+r.name+'" onchange="smetaRows['+i+'].name=this.value" style="width:100%;border:none;background:transparent;font-family:\'Nunito\',sans-serif;font-size:11px;font-weight:600;color:var(--text);outline:none"></td><td style="padding:5px 3px"><input value="'+r.unit+'" onchange="smetaRows['+i+'].unit=this.value" style="width:42px;border:1px solid var(--border);border-radius:5px;background:var(--bg);font-family:\'Nunito\',sans-serif;font-size:10px;padding:2px 4px;text-align:center;outline:none"></td><td style="padding:5px 3px"><input type="number" value="'+r.qty+'" onchange="smetaRows['+i+'].qty=+this.value;renderSmetaEditor()" style="width:48px;border:1px solid var(--border);border-radius:5px;background:var(--bg);font-family:\'Nunito\',sans-serif;font-size:10px;padding:2px 4px;text-align:center;outline:none"></td><td style="padding:5px 3px"><input type="number" value="'+r.priceClient+'" onchange="smetaRows['+i+'].priceClient=+this.value;renderSmetaEditor()" style="width:68px;border:1px solid var(--border);border-radius:5px;background:var(--bg);font-family:\'Nunito\',sans-serif;font-size:10px;padding:2px 4px;text-align:right;outline:none"></td><td style="padding:5px 3px;font-size:11px;font-weight:700;text-align:right">'+fmt(r.qty*r.priceClient)+'</td><td style="padding:5px 3px"><button onclick="smetaRows.splice('+i+',1);renderSmetaEditor()" style="background:var(--red-l);border:none;border-radius:4px;color:var(--red);width:22px;height:22px;cursor:pointer;font-size:13px">×</button></td></tr>').join('')
+    +smetaRows.map((r,i)=>'<tr style="border-top:1px solid var(--border)"><td style="padding:5px 7px"><input value="'+r.name+'" onchange="smetaRows['+i+'].name=this.value" style="width:100%;border:none;background:transparent;font-family:\'Nunito\',sans-serif;font-size:11px;font-weight:600;color:var(--text);outline:none"></td><td style="padding:5px 3px"><input value="'+r.unit+'" onchange="smetaRows['+i+'].unit=this.value" style="width:42px;border:1px solid var(--border);border-radius:5px;background:var(--bg);font-family:\'Nunito\',sans-serif;font-size:10px;padding:2px 4px;text-align:center;outline:none"></td><td style="padding:5px 3px"><input type="number" value="'+r.qty+'" onchange="smetaRows['+i+'].qty=+this.value;renderSmetaEditor()" style="width:48px;border:1px solid var(--border);border-radius:5px;background:var(--bg);font-family:\'Nunito\',sans-serif;font-size:10px;padding:2px 4px;text-align:center;outline:none"></td><td style="padding:5px 3px"><input type="number" value="'+r.priceClient+'" onchange="smetaRows['+i+'].priceClient=+this.value;renderSmetaEditor()" style="width:68px;border:1px solid var(--border);border-radius:5px;background:var(--bg);font-family:\'Nunito\',sans-serif;font-size:10px;padding:2px 4px;text-align:right;outline:none"></td><td style="padding:5px 3px;font-size:11px;font-weight:700;text-align:right">'+fmt(r.qty*r.priceClient)+'</td><td style="padding:5px 3px"><button onclick="smetaRows.splice('+i+',1);renderSmetaEditor()" style="background:var(--red-l);border:none;border-radius:4px;color:var(--red);width:22px;height:22px;cursor:pointer;font-size:13px">×</button></td></td>').join('')
     +'</table></div>'
     +'<div style="background:var(--white);border-radius:11px;padding:11px;margin-top:8px"><div style="display:grid;grid-template-columns:repeat(3,1fr);gap:5px;margin-bottom:9px"><div style="background:var(--green-l);border-radius:8px;padding:9px;text-align:center"><div style="font-size:9px;color:var(--muted)">Работы</div><div style="font-size:13px;font-weight:800;color:var(--green)">'+fmt(w)+'₽</div></div><div style="background:var(--blue-l);border-radius:8px;padding:9px;text-align:center"><div style="font-size:9px;color:var(--muted)">Материалы</div><div style="font-size:13px;font-weight:800;color:var(--blue)">'+fmt(m)+'₽</div></div><div style="background:var(--amber-l);border-radius:8px;padding:9px;text-align:center"><div style="font-size:9px;color:var(--muted)">Доставка</div><div style="font-size:13px;font-weight:800;color:var(--amber)">'+fmt(d)+'₽</div></div></div><div style="background:var(--blue-l);border:1.5px solid var(--blue-m);border-radius:9px;padding:11px;display:flex;justify-content:space-between;align-items:center"><span style="font-size:12px;font-weight:700;color:var(--muted)">ИТОГО</span><span style="font-size:22px;font-weight:800;color:var(--blue)">'+fmt(grand)+' ₽</span></div></div>';
 }
@@ -1836,11 +1764,9 @@ function sendSmetaWA(){
 // CLOUD — сохранение в личный чат бота (надёжно на любом устройстве)
 const SAVE_TAG='#ANT_CRM_V3';
 
-// Автосохранение ОТКЛЮЧЕНО — данные НЕ летят в Telegram автоматически
 async function cloudSave(){}
 async function saveTasksCloud(){}
 
-// Ручное сохранение — только по нажатию кнопки 🔄
 async function manualSave(){
   showSync('Сохранение...');
   try{
@@ -1867,7 +1793,6 @@ async function cloudLoad(){
       });
     });
     if(best){clients=best;localStorage.setItem('ant_clients2',JSON.stringify(clients));showSync('✓ '+clients.length+' кл.');setTimeout(()=>showSync(''),3000);return true}
-    // Fallback — localStorage
     const local=localStorage.getItem('ant_clients2');
     if(local){try{const p=JSON.parse(local);if(p.length>0){clients=p;showSync('✓ Локально');setTimeout(()=>showSync(''),2000);return true}}catch(e){}}
     showSync('');return false;
@@ -1883,19 +1808,12 @@ async function syncAgent(){
   catch(e){btn.textContent='❌';setTimeout(()=>{btn.textContent='📡';btn.disabled=false},2000)}
 }
 function showSync(msg){const el=document.getElementById('syncStatus');if(el)el.textContent=msg}
-
-// Бот бригады @agent_docbot — для уведомлений по клиентам и бригаде
 async function tg(chatId,text){
   try{await fetch('https://api.telegram.org/bot'+TG_TOKEN+'/sendMessage',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({chat_id:chatId,text,parse_mode:'Markdown'})})}catch(e){}
 }
-
-// Личный бот @ant_manager_bot — только ваши задачи
 async function myTg(text){
   try{await fetch('https://api.telegram.org/bot'+MY_BOT+'/sendMessage',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({chat_id:MY_CHAT,text,parse_mode:'Markdown'})})}catch(e){}
 }
-
-
-// Сигналы платёжеспособности в форме добавления лида
 var activeSignals=new Set();
 function toggleSignal(btn,key){
   if(activeSignals.has(key)){
@@ -1906,8 +1824,6 @@ function toggleSignal(btn,key){
     btn.style.background='var(--blue-l)';btn.style.color='var(--blue)';btn.style.borderColor='var(--blue)';
   }
 }
-
-// Удалить задачу из Мои задачи
 function removeMyTask(id){
   myTasks=myTasks.filter(function(t){return t.id!==id;});
   saveMyTasks();renderMyTasks();
@@ -1919,11 +1835,8 @@ async function clientTg(clientId,text){
 async function notifyClient(){
   const c=clients.find(x=>x.id===currentClientId);if(!c)return;
   if(!c.phone){toast('Нет номера телефона — добавьте через ✏️','err');return;}
-
   const cabinetUrl='https://eugenemaratovitch1-alt.github.io/ant-cabinet?id='+c.id;
   const st=STAGES.find(s=>s.id===c.stage)||STAGES[0];
-
-  // Сообщения по этапу
   const msgs={
     new:'👋 Здравствуйте, '+c.name+'!\n\nВаша заявка принята, мы свяжемся с вами в ближайшее время.\n\n📞 +7 920 010-03-21',
     measure:'📐 '+c.name+', добрый день!\n\nНапоминаем о замере на вашем объекте.\n\nВопросы: +7 920 010-03-21',
@@ -1932,44 +1845,32 @@ async function notifyClient(){
     montage:'🔨 '+c.name+', добрый день!\n\nБригада приступила к работе на вашем объекте.\n\nВопросы: +7 920 010-03-21',
     done:'✅ '+c.name+', добрый день!\n\nРаботы на вашем объекте завершены!\nГарантия 5 лет на все виды работ.\n\nСпасибо, что выбрали DOC! 🏠\n📞 +7 920 010-03-21',
   };
-
   const baseMsg=msgs[c.stage]||('Добрый день, '+c.name+'!\n\nОбновление по вашему заказу: '+st.name+'\n\n📞 +7 920 010-03-21');
-
-  // Добавляем ссылку на кабинет
   const fullMsg=baseMsg+'\n\n🏠 Ваш личный кабинет (следите за ходом работ):\n'+cabinetUrl;
-
-  // Открываем попап с выбором — WhatsApp или Telegram
   const wrap=document.createElement('div');
   wrap.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;display:flex;align-items:flex-end;justify-content:center';
   const box=document.createElement('div');
   box.style.cssText='background:var(--white);border-radius:14px 14px 0 0;padding:16px;width:100%;max-width:480px';
-
   const phone=c.phone.replace(/\D/g,'');
   const tgPhone='https://t.me/+'+phone;
   const tgUsername=c.clientUsername?'https://t.me/'+c.clientUsername.replace('@',''):'';
   const emailUrl=c.email?'mailto:'+c.email+'?subject='+encodeURIComponent('DOC — Личный кабинет')+'&body='+encodeURIComponent(fullMsg):'';
-
   box.innerHTML=
     '<div style="font-size:15px;font-weight:800;margin-bottom:4px">Отправить клиенту</div>'
     +'<div style="font-size:12px;color:var(--muted);margin-bottom:14px">'+c.name+' · '+c.phone+'</div>'
     +'<div style="background:var(--bg);border-radius:10px;padding:11px;font-size:12px;line-height:1.7;margin-bottom:6px;max-height:130px;overflow-y:auto;white-space:pre-wrap;color:var(--text)" id="msgPreview">'+fullMsg+'</div>'
     +'<button onclick="navigator.clipboard&&navigator.clipboard.writeText(document.getElementById(\'msgPreview\').textContent).then(()=>{this.textContent=\'✅ Скопировано!\';setTimeout(()=>this.textContent=\'📋 Скопировать текст\',1500)})" style="width:100%;padding:8px;background:var(--bg);border:1px solid var(--border);border-radius:8px;font-size:12px;font-weight:700;cursor:pointer;color:var(--muted);margin-bottom:12px">📋 Скопировать текст</button>'
-    // Telegram
     +'<button onclick="navigator.clipboard&&navigator.clipboard.writeText(document.getElementById(\'msgPreview\').textContent);setTimeout(()=>{window.open(\''+( tgUsername||tgPhone)+'\',\'_blank\')},200);logNotify(\'telegram\')" style="width:100%;padding:13px;background:#2563eb;border:none;border-radius:10px;color:#fff;font-size:14px;font-weight:800;cursor:pointer;margin-bottom:8px">✈️ Telegram (копирует текст + открывает чат)</button>'
-    // Email
     +(emailUrl
       ?'<button onclick="if(window._notifyEmailUrl){window.location.href=window._notifyEmailUrl;logNotify(\'email\')}" style="width:100%;padding:13px;background:var(--bg);border:1.5px solid var(--border);border-radius:10px;color:var(--text);font-size:14px;font-weight:800;cursor:pointer;margin-bottom:8px">📧 Открыть почту (текст уже в письме)</button>'
       :'<div style="font-size:11px;color:var(--muted);text-align:center;margin-bottom:8px">📧 Email не указан — добавьте через ✏️</div>'
     )
     +'<button onclick="this.closest(\'[style*=fixed]\').remove()" style="width:100%;padding:11px;background:var(--bg);border:none;border-radius:10px;font-size:13px;font-weight:700;cursor:pointer;color:var(--muted)">Отмена</button>';
-
   window._notifyEmailUrl=emailUrl;
   window._notifyTgUrl=tgUsername||tgPhone;
   wrap.appendChild(box);
   wrap.onclick=function(e){if(e.target===wrap)wrap.remove();};
   document.body.appendChild(wrap);
-
-  // Функция записи в историю
   window.logNotify=function(channel){
     const c2=clients.find(x=>x.id===currentClientId);if(!c2)return;
     c2.history.push({text:'📲 Уведомление отправлено ('+channel+'): '+st.name,time:new Date().toLocaleString('ru'),color:'#16a34a'});
@@ -1978,14 +1879,8 @@ async function notifyClient(){
   };
 }
 
-// ═══ SUPABASE ═══
-const SB_URL='https://xlrsfuhjwdcfxshaofrv.supabase.co';
-const SB_KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhscnNmdWhqd2RjZnhzaGFvZnJ2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzk5NDg3MjcsImV4cCI6MjA5NTUyNDcyN30.xmnVlOEogkDZNwJmG61OW-6daiuCUihMPeJ0es7Du9s';
-const supabaseClient = window.supabase.createClient(SB_URL, SB_KEY);
 async function sbUpsert(t,d){try{const a=Array.isArray(d)?d:[d];await fetch(SB_URL+'/rest/v1/'+t,{method:'POST',headers:{apikey:SB_KEY,Authorization:'Bearer '+SB_KEY,'Content-Type':'application/json','Prefer':'resolution=merge-duplicates'},body:JSON.stringify(a)});}catch(e){}}
 async function sbDelete(t,id){try{await fetch(SB_URL+'/rest/v1/'+t+'?id=eq.'+id,{method:'DELETE',headers:{apikey:SB_KEY,Authorization:'Bearer '+SB_KEY}});}catch(e){}}
-
-// ═══ TOAST ═══
 function toast(msg,type){
   let t=document.createElement('div');
   const bg=type==='err'?'var(--red)':type==='info'?'var(--blue)':'var(--green)';
@@ -1994,11 +1889,8 @@ function toast(msg,type){
   setTimeout(()=>t.style.opacity='1',10);
   setTimeout(()=>{t.style.opacity='0';setTimeout(()=>t.remove(),300);},2500);
 }
-
-// ═══ ВОРОНКА — ОТКАЗ И ПЛАНИРОВАНИЕ ═══
 var pendingStageChange=null,selectedRefuseReason=null;
 const REFUSE_LABELS={expensive:'💰 Дорого',notNow:'⏰ Не сейчас',competitor:'👥 Ушёл к другому',noAnswer:'📵 Не отвечает',noNeed:'🚫 Передумал',other:'🔹 Другое'};
-
 function applyStageChange(c,s,extra){
   const old=STAGES.find(x=>x.id===c.stage)||{name:'—',color:'#94a3b8'};
   const nw=STAGES.find(x=>x.id===s);if(!nw)return;
@@ -2045,8 +1937,6 @@ function confirmPlanned(){
   applyStageChange(c,'planned',date+(time?' '+time:'')+(note?' · '+note:''));
   toast('📅 Запланировано на '+date);
 }
-
-// ═══ ПАСПОРТ ОБЪЕКТА ═══
 const PASSPORT_SYSTEMS=[
   {id:'drain',icon:'🌧',name:'Водостоки',hint:'Монтаж от 800₽/м · чистка от 3 000₽'},
   {id:'roof',icon:'🏠',name:'Кровля',hint:'Ремонт от 500₽/м² · замена от 3 500₽/м²'},
@@ -2110,7 +2000,6 @@ function openPassport(){
   document.getElementById('passportOverlay').classList.add('open');
 }
 function selectPassportStatus(sysId,statusId){
-  // Находим все кнопки этой системы и обновляем стили
   document.querySelectorAll('.pst-btn[data-sys="'+sysId+'"]').forEach(btn=>{
     const st=PASSPORT_STATUS.find(x=>x.id===btn.dataset.st);if(!st)return;
     const active=btn.dataset.st===statusId;
@@ -2124,7 +2013,6 @@ function savePassport(){
   const c=clients.find(x=>x.id===currentClientId);if(!c)return;
   if(!c.passport)c.passport={};
   PASSPORT_SYSTEMS.forEach(s=>{
-    // Читаем активный статус по data-active
     let status='none';
     const activBtn=document.querySelector('.pst-btn[data-sys="'+s.id+'"][data-active="1"]');
     if(activBtn)status=activBtn.dataset.st;
@@ -2143,8 +2031,6 @@ function savePassport(){
   toast('✅ Паспорт объекта сохранён');
 }
 function closePassport(){document.getElementById('passportOverlay').classList.remove('open');}
-
-// ═══ ДОПРОДАЖИ ═══
 const UPSELL_SERVICES=[{id:'clean',icon:'🧹',name:'Чистка водостоков'},{id:'snow',icon:'❄️',name:'Снегозадержатели'},{id:'roof_check',icon:'🏠',name:'Осмотр кровли'},{id:'landscape',icon:'🌿',name:'Благоустройство'},{id:'facade',icon:'🪟',name:'Фасад'},{id:'electric',icon:'⚡',name:'Электрика'},{id:'plumbing',icon:'🔧',name:'Сантехника'},{id:'to',icon:'🔄',name:'Годовое ТО'},{id:'other',icon:'🔹',name:'Другое'}];
 const UPSELL_STATUS={idea:{label:'Идея',bg:'var(--bg)',clr:'var(--muted)'},offered:{label:'Предложено',bg:'var(--blue-l)',clr:'var(--blue)'},agreed:{label:'Согласовано',bg:'var(--amber-l)',clr:'var(--amber)'},done:{label:'Сделано',bg:'var(--green-l)',clr:'var(--green)'}};
 function renderUpsellItems(c){
@@ -2198,7 +2084,6 @@ function addUpsellItem(){
   box.appendChild(cancelBtn);
   wrap.appendChild(box);document.body.appendChild(wrap);window._upsellWrap=wrap;
 }
-
 function selectUpsell(serviceId){
   const c=clients.find(x=>x.id===currentClientId);if(!c)return;
   if(!c.upsellItems)c.upsellItems=[];
@@ -2230,8 +2115,6 @@ async function sendUpsellOffer(clientId,service){
   c.history.push({text:'🔄 Предложение: '+service,time:new Date().toLocaleString('ru'),color:'#7c3aed'});
   saveClients();
 }
-
-// ═══ ПОВТОРНЫЕ ПРОДАЖИ ═══
 function getUpsellClients(){
   const now=Date.now(),month=new Date().getMonth();
   const isSeason=(month>=2&&month<=4)||(month>=8&&month<=10);
@@ -2247,8 +2130,6 @@ function getUpsellClients(){
   });
   return result.slice(0,5);
 }
-
-// ═══ ФИНАНСОВЫЙ МОДУЛЬ ═══
 var moneyData=JSON.parse(localStorage.getItem('doc_money')||'{"incomes":[],"expenses":[],"salPct":50,"savPct":20}');
 function saveMoney(){localStorage.setItem('doc_money',JSON.stringify(moneyData));}
 function showMoneyTab(id){
@@ -2407,9 +2288,6 @@ function addMyTask(){
   const el=document.getElementById('myTaskText');if(el)el.value='';
   renderMyTasks();myTg('📌 Новая задача: '+txt+(date?' · '+date:'')+(time?' ⏰'+time:''));
 }
-
-
-// ═══ ПАРТНЁРЫ ═══
 var PCAT={drain:'🌧 Водостоки',roof:'🏠 Кровля',facade:'🪟 Фасад',clean:'🧹 Чистка',landscape:'🌿 Благоустройство',plumbing:'🔧 Сантехника',electric:'⚡ Электрика',special:'🚜 Спецтехника'};
 var PSTATUS_CLR={main:'var(--green)',backup:'var(--amber)',inactive:'var(--muted)'};
 var PSTATUS_BG={main:'var(--green-l)',backup:'var(--amber-l)',inactive:'var(--bg)'};
@@ -2451,8 +2329,6 @@ function addPriceRow(){priceItems.push({id:genId(),name:'',price:'',unit:'пог
 function renderPriceRows(){var el=document.getElementById('priceRows');if(!el)return;if(!priceItems.length){el.innerHTML='<div style="font-size:11px;color:var(--muted);padding:6px 0">Нет позиций</div>';return;}el.innerHTML=priceItems.map(function(r,i){return '<div style="display:grid;grid-template-columns:1fr 80px 60px 24px;gap:5px;margin-bottom:5px;align-items:center"><input value="'+r.name+'" onchange="priceItems['+i+'].name=this.value" class="fi" style="padding:7px 9px;font-size:12px" placeholder="Название"><input value="'+r.price+'" onchange="priceItems['+i+'].price=this.value" class="fi" style="padding:7px 9px;font-size:12px;text-align:right" placeholder="Цена" type="number"><input value="'+r.unit+'" onchange="priceItems['+i+'].unit=this.value" class="fi" style="padding:7px 9px;font-size:12px" placeholder="ед."><button onclick="priceItems.splice('+i+',1);renderPriceRows()" style="width:24px;height:24px;background:none;border:none;color:var(--hint);font-size:16px;cursor:pointer">&times;</button></div>';}).join('');}
 function savePartner(){var name=(document.getElementById('pName').value||'').trim();if(!name){toast('Введите название','err');return;}var p={id:currentPartnerId||genId(),type:currentPartnerType,cat:document.getElementById('pCat').value,name:name,phone:(document.getElementById('pPhone').value||'').trim(),contact:(document.getElementById('pContact').value||'').trim(),notes:(document.getElementById('pNotes').value||'').trim(),status:currentPartnerStatus,prices:JSON.parse(JSON.stringify(priceItems)),created:Date.now()};if(currentPartnerId){var idx=partners.findIndex(function(x){return x.id===currentPartnerId;});if(idx>=0)partners[idx]=p;}else partners.unshift(p);savePartners();closePartnerOverlay();renderPartners();toast('Сохранено');}
 function deletePartner(){var p=partners.find(function(x){return x.id===currentPartnerId;});if(!p)return;var wrap=document.createElement('div');wrap.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px';var box=document.createElement('div');box.style.cssText='background:var(--white);border-radius:14px;padding:20px;width:100%;max-width:300px;text-align:center';box.innerHTML='<div style="font-size:32px;margin-bottom:8px">🗑</div><div style="font-size:15px;font-weight:700;margin-bottom:4px">Удалить партнёра?</div><div style="font-size:13px;color:var(--muted);margin-bottom:16px">'+p.name+'</div><div style="display:flex;gap:8px"><button id="dpC" style="flex:1;padding:11px;background:var(--bg);border:none;border-radius:9px;font-size:13px;font-weight:700;cursor:pointer">Отмена</button><button id="dpD" style="flex:1;padding:11px;background:var(--red);border:none;border-radius:9px;color:#fff;font-size:13px;font-weight:700;cursor:pointer">Удалить</button></div>';wrap.appendChild(box);document.body.appendChild(wrap);document.getElementById('dpC').onclick=function(){wrap.remove();};document.getElementById('dpD').onclick=function(){wrap.remove();partners=partners.filter(function(x){return x.id!==currentPartnerId;});savePartners();closePartnerOverlay();renderPartners();};}
-
-// ═══ AI-АНАЛИЗ ═══
 var AI_SYSTEM_PROMPT='Ты аналитик премиального сервиса DOC (Пермь). Читаешь заметки менеджера из живого разговора и выдаёшь СТРОГО JSON без markdown: {"client_level":"ECONOM|STANDARD|PREMIUM|VIP","recommended_package":"BASIC|STANDARD|PREMIUM","monthly_price":число,"needs":["..."],"offer":["..."],"next_step":"конкретное действие","priority":"низкий|средний|высокий|срочно","summary":"2-3 предложения о клиенте"}. Пакеты: BASIC=39000/мес, STANDARD=79000/мес, PREMIUM=150000+/мес. СИГНАЛЫ VIP/PREMIUM: кирпич/газобетон — дорогой дом; большой дом 200м²+; посёлок/КП (особенно Онегин,Дубрава,Заповедный,Дружино,Сосновый бор); некогда самому — покупает сервис; по рекомендации — лояльный; не спросил цену — не экономит. СИГНАЛЫ ECONOM: дерево/каркас — бюджетный дом; сразу торгуется; СНТ/деревня; спрашивает цену первым. Чем больше VIP-сигналов — тем выше уровень. Позиционирование DOC: регулярное обслуживание дома, не разовые работы.';
 async function analyzeLeadAI(clientId){
   var c=clients.find(function(x){return x.id===clientId;});if(!c)return;
@@ -2492,8 +2368,6 @@ function renderAICard(c){
   h+='</div>';
   ab.innerHTML=h;
 }
-
-// ═══ КАРТОЧКА В СПИСКЕ ═══
 function clientCardHtml(c,td,tmr){
   if(c.stage==='thinking')c.stage='estimate';
   const st=STAGES.find(s=>s.id===c.stage)||STAGES[0];
