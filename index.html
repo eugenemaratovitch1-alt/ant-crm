@@ -1814,7 +1814,6 @@ async function tg(chatId,text){
 async function myTg(text){
   try{await fetch('https://api.telegram.org/bot'+MY_BOT+'/sendMessage',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({chat_id:MY_CHAT,text,parse_mode:'Markdown'})})}catch(e){}
 }
-var activeSignals=new Set();
 function toggleSignal(btn,key){
   if(activeSignals.has(key)){
     activeSignals.delete(key);
