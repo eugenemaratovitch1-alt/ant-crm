@@ -4,6 +4,9 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1">
 <title>ANT CRM</title>
+<link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800&display=swap" rel="stylesheet">
+<!-- 🔧 ДОБАВЛЕНО: Библиотека Supabase (без неё скрипт падал при загрузке) -->
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <style>
 *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
 :root{
@@ -161,7 +164,6 @@ textarea.fi{resize:none;min-height:65px}
 .day-popup-overlay.open{display:flex}
 footer{height:70px}
 </style>
-<link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800&display=swap" rel="stylesheet">
 </head>
 <body>
 <div id="loginWrap">
@@ -726,10 +728,10 @@ let myTasks=JSON.parse(localStorage.getItem('ant_my_tasks')||'[]');
 let currentClientId=null;
 let addTempVal='normal';
 let calYear=new Date().getFullYear(), calMonth=new Date().getMonth();
-let calSelected=today();
+let calSelected=new Date().toISOString().slice(0,10);
 let smetaRows=[];
 let matItems=[];
-let activeSignals = new Set(); // ДОБАВЛЕНО ДЛЯ ИСПРАВЛЕНИЯ
+let activeSignals = new Set(); // ✅ ИСПРАВЛЕНО: объявлена до использования
 function saveClients(){
 localStorage.setItem('ant_clients2',JSON.stringify(clients));
 clearTimeout(saveClients._timer);
@@ -828,8 +830,9 @@ startApp();
 // ═══ SUPABASE ═══
 const SB_URL='https://xlrsfuhjwdcfxshaofrv.supabase.co';
 const SB_KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhscnNmdWhqd2RjZnhzaGFvZnJ2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzk5NDg3MjcsImV4cCI6MjA5NTUyNDcyN30.xmnVlOEogkDZNwJmG61OW-6daiuCUihMPeJ0es7Du9s';
-const supabaseClient = window.supabase.createClient(SB_URL, SB_KEY);
+const supabaseClient = window.supabase ? window.supabase.createClient(SB_URL, SB_KEY) : null;
 async function loadFromSupabase() {
+if(!supabaseClient) return false;
 try {
 const { data, error } = await supabaseClient
 .from('clients2')
@@ -1118,8 +1121,7 @@ function changeStage(s){
 const c=clients.find(x=>x.id===currentClientId);if(!c)return;
 const old=STAGES.find(x=>x.id===c.stage),nw=STAGES.find(x=>x.id===s);
 c.stage=s; c.history.push({text:old.name+' → '+nw.name,time:new Date().toLocaleString('ru'),color:nw.color});
-saveClients(); renderClient(c); tg(MY_CHAT,'📊 *'+c.name+'*
-'+old.name+' → '+nw.name);
+saveClients(); renderClient(c); tg(MY_CHAT,'📊 *'+c.name+'*\n'+old.name+' → '+nw.name);
 }
 function toggleStep(sid){
 const c=clients.find(x=>x.id===currentClientId);if(!c)return;
@@ -1134,9 +1136,7 @@ return;
 c.steps[sid]=!c.steps[sid];
 if(c.steps[sid]&&step){
 c.history.push({text:'✓ '+step.text,time:new Date().toLocaleString('ru'),color:'#16a34a'});
-if(sid==='closed')tg(BRIGADE_CHAT,'✅ ОБЪЕКТ СДАН
-👤 '+c.name+'
-Отличная работа!');
+if(sid==='closed')tg(BRIGADE_CHAT,'✅ ОБЪЕКТ СДАН\n👤 '+c.name+'\nОтличная работа!');
 }
 saveClients();renderClient(c);
 }
@@ -1155,16 +1155,11 @@ const date=document.getElementById('taskDate').value;
 c.tasks.push({text,date,done:false});
 c.history.push({text:'Задача: '+text,time:new Date().toLocaleString('ru'),color:'#d97706'});
 saveClients(); renderClient(c);
-const msg='📌 *Задача по объекту*
-'
-+'👤 '+c.name+'
-'
-+'📍 '+(c.addr||'—')+'
-'
-+(date?'📅 '+date+'
-':'')
-+'
-'+text;
+const msg='📌 *Задача по объекту*\n'
++'👤 '+c.name+'\n'
++'📍 '+(c.addr||'—')+'\n'
++(date?'📅 '+date+'\n':'')
++'\n'+text;
 tg(BRIGADE_CHAT,msg);
 }
 function toggleTask(i){const c=clients.find(x=>x.id===currentClientId);if(!c)return;c.tasks[i].done=!c.tasks[i].done;saveClients();renderClient(c)}
@@ -1206,8 +1201,7 @@ reader.readAsDataURL(file);
 async function sendPhotoToTG(base64,clientName,caption){
 try{
 const res=await fetch(base64); const blob=await res.blob();
-const form=new FormData(); form.append('chat_id',MY_CHAT); form.append('photo',blob,'photo.jpg'); form.append('caption','📷 '+clientName+'
-'+caption);
+const form=new FormData(); form.append('chat_id',MY_CHAT); form.append('photo',blob,'photo.jpg'); form.append('caption','📷 '+clientName+'\n'+caption);
 await fetch('https://api.telegram.org/bot'+TG_TOKEN+'/sendPhoto',{method:'POST',body:form});
 }catch(e){}
 }
@@ -1231,35 +1225,18 @@ const c=clients.find(x=>x.id===currentClientId);if(!c)return;
 const brig=c.sum?Math.round(c.sum*(1-BRIGADE_COMMISSION/100)):0;
 const done=STEPS.filter(s=>c.steps&&c.steps[s.id]);
 const todo=STEPS.filter(s=>!(c.steps&&c.steps[s.id]));
-const stepsLine=todo.map(s=>'⬜ '+s.text).join('
-')+(done.length?'
-'+done.map(s=>'✅ '+s.text).join('
-'):'');
+const stepsLine=todo.map(s=>'⬜ '+s.text).join('\n')+(done.length?'\n'+done.map(s=>'✅ '+s.text).join('\n'):'');
 const matText=(c.matFreeText||'').trim();
-const text='🔨 ЗАДАНИЕ — DOC
-'
-+'📍 '+(c.addr||'адрес уточните у Евгения')+'
-'
-+'👤 '+c.name+(c.phone?' · '+c.phone:'')+'
-'
-+(c.serviceName?'🔧 '+c.serviceName+'
-':'')
-+'
-'+(c.negotiations||c.notes?'📝 Детали:
-'+(c.negotiations||c.notes)+'
-':'')
-+(matText?'🛒 Материалы:
-'+matText+'
-':'')
-+'📋 Этапы:
-'+stepsLine+'
-'
-+'📷 ФОТО ДО и ПОСЛЕ — обязательно!
-'
-+(brig?'💰 Ваша оплата: '+fmt(brig)+' ₽
-':'')
-+'
-Вопросы: +7 920 010-03-21';
+const text='🔨 ЗАДАНИЕ — DOC\n'
++'📍 '+(c.addr||'адрес уточните у Евгения')+'\n'
++'👤 '+c.name+(c.phone?' · '+c.phone:'')+'\n'
++(c.serviceName?'🔧 '+c.serviceName+'\n':'')
++'\n'+(c.negotiations||c.notes?'📝 Детали:\n'+(c.negotiations||c.notes)+'\n':'')
++(matText?'🛒 Материалы:\n'+matText+'\n':'')
++'📋 Этапы:\n'+stepsLine+'\n'
++'📷 ФОТО ДО и ПОСЛЕ — обязательно!\n'
++(brig?'💰 Ваша оплата: '+fmt(brig)+' ₽\n':'')
++'\nВопросы: +7 920 010-03-21';
 document.getElementById('brigadePreview').textContent=text;
 const extra=document.getElementById('brigadeExtra');if(extra)extra.value='';
 document.getElementById('brigadeOverlay').classList.add('open');
@@ -1268,8 +1245,7 @@ async function sendBrigadeMsg(){
 const c=clients.find(x=>x.id===currentClientId);if(!c)return;
 let text=document.getElementById('brigadePreview').textContent;
 const extra=(document.getElementById('brigadeExtra')||{}).value||'';
-if(extra.trim())text+='
-➕ '+extra.trim();
+if(extra.trim())text+='\n➕ '+extra.trim();
 await tg(BRIGADE_CHAT,text);
 c.history.push({text:'👷 Задание отправлено бригаде',time:new Date().toLocaleString('ru'),color:'#f97316'});
 saveClients();renderClient(c);
@@ -1300,11 +1276,7 @@ const ta=document.getElementById('matFreeText');
 c.matFreeText=ta?ta.value.trim():'';
 c.history.push({text:'📦 Материалы отправлены бригаде',time:new Date().toLocaleString('ru'),color:'#f97316'});
 saveClients();
-const text='🛒 МАТЕРИАЛЫ — DOC
-📍 '+(c.addr||'уточните')+'
-👤 '+c.name+'
-'+(c.matFreeText||'Список не указан')+'
-Вопросы: +7 920 010-03-21';
+const text='🛒 МАТЕРИАЛЫ — DOC\n📍 '+(c.addr||'уточните')+'\n👤 '+c.name+'\n'+(c.matFreeText||'Список не указан')+'\nВопросы: +7 920 010-03-21';
 await tg(BRIGADE_CHAT,text);
 closeMatOverlay();renderClient(c);
 toast('✅ Отправлено в группу DOC Подряд');
@@ -1327,8 +1299,7 @@ const c=clients.find(x=>x.id===currentClientId);if(!c)return;
 c.history.push({text:'✅ Бригада приняла правила и взяла заказ',time:new Date().toLocaleString('ru'),color:'#16a34a'});
 saveClients(); document.getElementById('rulesOverlay').classList.remove('open'); renderClient(c);
 const addrInfo=c.addr?' · '+c.addr:'';
-tg(MY_CHAT,'✅ *Правила приняты*
-Бригада взяла заказ: '+c.name+addrInfo);
+tg(MY_CHAT,'✅ *Правила приняты*\nБригада взяла заказ: '+c.name+addrInfo);
 toast('✅ Принято! Заказ подтверждён.');
 }
 // HINT
@@ -1362,9 +1333,7 @@ const svcVal=svcEl?svcEl.value:'';
 const svcNames={drain:'Водостоки',roof:'Кровля',snow:'Снегозадержатели',facade:'Фасад',clean:'Чистка',landscape:'Благоустройство',plumbing:'Сантехника',electric:'Электрика',to:'Регулярное ТО',complex:'Комплекс'};
 const svcName=svcNames[svcVal]||'';
 const rawNote=document.getElementById('aNote').value.trim();
-const fullNote=rawNote+(svcName?'
-Что нужно: '+svcName:'')+(signalsText?'
-Сигналы: '+signalsText:'');
+const fullNote=rawNote+(svcName?'\nЧто нужно: '+svcName:'')+(signalsText?'\nСигналы: '+signalsText:'');
 const c={
 id:genId(),name,
 phone:document.getElementById('aPhone').value.trim(),
@@ -1391,9 +1360,7 @@ document.querySelectorAll('#paySignalsGrid .sp').forEach(b=>{b.style.background=
 addTempVal='normal';
 setAddTemp('normal');
 const sigStr=signalsText?' · '+signalsText:'';
-tg(MY_CHAT,'🆕 *Новый лид*
-'+name+(c.phone?' · '+c.phone:'')+'
-'+(SRC[c.source]||'')+sigStr+(svcName?' · '+svcName:''));
+tg(MY_CHAT,'🆕 *Новый лид*\n'+name+(c.phone?' · '+c.phone:'')+'\n'+(SRC[c.source]||'')+sigStr+(svcName?' · '+svcName:''));
 if(typeof analyzeLeadAI==='function') setTimeout(()=>analyzeLeadAI(c.id),300);
 }
 // CALENDAR
@@ -1485,8 +1452,7 @@ function toggleMyTaskDay(id,ds){
 const t=myTasks.find(x=>x.id===id);if(!t)return;
 const wasDone=t.done;
 t.done=!t.done; saveMyTasks(); renderDayTasksList(ds); renderCalendar(); renderMyTasks();
-if(!wasDone&&t.done) myTg('✅ *Выполнено*
-'+t.text);
+if(!wasDone&&t.done) myTg('✅ *Выполнено*\n'+t.text);
 }
 function deleteMyTaskDay(id,ds){
 myTasks=myTasks.filter(x=>x.id!==id); saveMyTasks(); renderDayTasksList(ds); renderCalendar(); renderMyTasks();
@@ -1521,9 +1487,7 @@ if(newDate<=today()) t.priority='high';
 saveMyTasks();
 if(wrap)wrap.remove();
 renderDayTasksList(oldDs); renderCalendar(); renderMyTasks();
-myTg('📆 *Перенесена*
-'+t.text+'
-'+oldDs+' → '+newDate);
+myTg('📆 *Перенесена*\n'+t.text+'\n'+oldDs+' → '+newDate);
 }
 function addDayTask(){
 const text=document.getElementById('newTaskInput').value.trim();if(!text)return;
@@ -1532,15 +1496,13 @@ const t={id:genId(),text,date,done:false,priority:'mid',cat:'other',created:Date
 myTasks.unshift(t); saveMyTasks(); renderDayTasksList(date); renderCalendar();
 document.getElementById('newTaskInput').value='';
 setTimeout(()=>{const el=document.getElementById('newTaskInput');if(el)el.focus()},50);
-myTg('📝 '+date+'
-'+text);
+myTg('📝 '+date+'\n'+text);
 }
 function toggleMyTask(id){
 const t=myTasks.find(x=>x.id===id);if(!t)return;
 const wasDone=t.done;
 t.done=!t.done; saveMyTasks(); renderMyTasks(); renderCalendar();
-if(!wasDone&&t.done) myTg('✅ *Выполнено*
-'+t.text);
+if(!wasDone&&t.done) myTg('✅ *Выполнено*\n'+t.text);
 }
 function deleteMyTask(id){myTasks=myTasks.filter(x=>x.id!==id);saveMyTasks();renderMyTasks();renderCalendar()}
 function renderMyTasks(){
@@ -1698,13 +1660,7 @@ saveClients(); closeSmetaEditor(); renderClient(c); toast('✅ Смета сох
 function sendSmetaWA(){
 const c=clients.find(x=>x.id===currentClientId);if(!c)return;
 const total=smetaRows.reduce((a,r)=>a+r.qty*r.priceClient,0);
-const text='Здравствуйте, '+c.name+'! 👋
-Смета на монтаж водосточной системы:
-'+smetaRows.map(r=>'▪️ '+r.name+' — '+fmt(r.qty*r.priceClient)+' ₽').join('
-')+'
-💰 ИТОГО: '+fmt(total)+' ₽
-Оплата поэтапно. Гарантия 5 лет.
-📞 ИП Бикчантаев Е.М. · +7 920 010-03-21';
+const text='Здравствуйте, '+c.name+'! 👋\nСмета на монтаж водосточной системы:\n'+smetaRows.map(r=>'▪️ '+r.name+' — '+fmt(r.qty*r.priceClient)+' ₽').join('\n')+'\n💰 ИТОГО: '+fmt(total)+' ₽\nОплата поэтапно. Гарантия 5 лет.\n📞 ИП Бикчантаев Е.М. · +7 920 010-03-21';
 const phone=c.phone?c.phone.replace(/\D/g,''):'';
 window.open('https://wa.me/'+phone+'?text='+encodeURIComponent(text),'_blank');
 }
@@ -1715,8 +1671,7 @@ async function saveTasksCloud(){}
 async function manualSave(){
 showSync('Сохранение...');
 try{
-await fetch('https://api.telegram.org/bot'+TG_TOKEN+'/sendMessage',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({chat_id:'-1003999695366',text:SAVE_TAG+'
-'+JSON.stringify(clients)})});
+await fetch('https://api.telegram.org/bot'+TG_TOKEN+'/sendMessage',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({chat_id:'-1003999695366',text:SAVE_TAG+'\n'+JSON.stringify(clients)})});
 showSync('✓ Сохранено в облако');setTimeout(()=>showSync(''),3000);
 }catch(e){showSync('❌ Ошибка сети');setTimeout(()=>showSync(''),3000);}
 }
@@ -1733,8 +1688,7 @@ if(!msg||!msg.text) return;
 const tags=[SAVE_TAG,'#ANT_CRM_SAVE_V2',CLOUD_KEY];
 tags.forEach(tag=>{
 if(msg.text.startsWith(tag)&&msg.message_id>bestId){
-try{const p=JSON.parse(msg.text.replace(tag+'
-',''));if(Array.isArray(p)&&p.length>0){best=p;bestId=msg.message_id}}catch(e){}
+try{const p=JSON.parse(msg.text.replace(tag+'\n',''));if(Array.isArray(p)&&p.length>0){best=p;bestId=msg.message_id}}catch(e){}
 }
 });
 });
@@ -1783,33 +1737,15 @@ if(!c.phone){toast('Нет номера телефона — добавьте ч
 const cabinetUrl='https://eugenemaratovitch1-alt.github.io/ant-cabinet?id='+c.id;
 const st=STAGES.find(s=>s.id===c.stage)||STAGES[0];
 const msgs={
-new:'👋 Здравствуйте, '+c.name+'!
-Ваша заявка принята, мы свяжемся с вами в ближайшее время.
-📞 +7 920 010-03-21',
-measure:'📐 '+c.name+', добрый день!
-Напоминаем о замере на вашем объекте.
-Вопросы: +7 920 010-03-21',
-estimate:'💰 '+c.name+', добрый день!
-Ваша смета готова. Позвоните нам для обсуждения.
-📞 +7 920 010-03-21',
-planned:'📅 '+c.name+', добрый день!
-Монтаж запланирован'+(c.plannedDate?' на '+c.plannedDate:'')+'.
-Вопросы: +7 920 010-03-21',
-montage:'🔨 '+c.name+', добрый день!
-Бригада приступила к работе на вашем объекте.
-Вопросы: +7 920 010-03-21',
-done:'✅ '+c.name+', добрый день!
-Работы на вашем объекте завершены!
-Гарантия 5 лет на все виды работ.
-Спасибо, что выбрали DOC! 🏠
-📞 +7 920 010-03-21',
+new:'👋 Здравствуйте, '+c.name+'!\nВаша заявка принята, мы свяжемся с вами в ближайшее время.\n📞 +7 920 010-03-21',
+measure:'📐 '+c.name+', добрый день!\nНапоминаем о замере на вашем объекте.\nВопросы: +7 920 010-03-21',
+estimate:'💰 '+c.name+', добрый день!\nВаша смета готова. Позвоните нам для обсуждения.\n📞 +7 920 010-03-21',
+planned:'📅 '+c.name+', добрый день!\nМонтаж запланирован'+(c.plannedDate?' на '+c.plannedDate:'')+'.\nВопросы: +7 920 010-03-21',
+montage:'🔨 '+c.name+', добрый день!\nБригада приступила к работе на вашем объекте.\nВопросы: +7 920 010-03-21',
+done:'✅ '+c.name+', добрый день!\nРаботы на вашем объекте завершены!\nГарантия 5 лет на все виды работ.\nСпасибо, что выбрали DOC! 🏠\n📞 +7 920 010-03-21',
 };
-const baseMsg=msgs[c.stage]||('Добрый день, '+c.name+'!
-Обновление по вашему заказу: '+st.name+'
-📞 +7 920 010-03-21');
-const fullMsg=baseMsg+'
-🏠 Ваш личный кабинет (следите за ходом работ):
-'+cabinetUrl;
+const baseMsg=msgs[c.stage]||('Добрый день, '+c.name+'!\nОбновление по вашему заказу: '+st.name+'\n📞 +7 920 010-03-21');
+const fullMsg=baseMsg+'\n🏠 Ваш личный кабинет (следите за ходом работ):\n'+cabinetUrl;
 const wrap=document.createElement('div');
 wrap.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;display:flex;align-items:flex-end;justify-content:center';
 const box=document.createElement('div');
@@ -1859,21 +1795,9 @@ const nw=STAGES.find(x=>x.id===s);if(!nw)return;
 c.stage=s;
 const histText=old.name+' → '+nw.name+(extra?' ('+extra+')':'');
 c.history.push({text:histText,time:new Date().toLocaleString('ru'),color:nw.color});
-const brigMsg={planned:'📅 МОНТАЖ ЗАПЛАНИРОВАН
-👤 '+c.name+'
-📍 '+(c.addr||'уточните')+(extra?'
-🗓 '+extra:'')+'
-Вопросы: +7 920 010-03-21',montage:'🔨 ВЫХОДИМ НА ОБЪЕКТ
-👤 '+c.name+'
-📍 '+(c.addr||'уточните')+'
-📷 Фото ДО начала работ!
-Вопросы: +7 920 010-03-21',done:'✅ ОБЪЕКТ ПРИНЯТ
-👤 '+c.name+'
-Отлично! Оплата будет начислена.
-💰 '+(c.sum?fmt(Math.round(c.sum*(1-BRIGADE_COMMISSION/100)))+' ₽':'уточнить')};
+const brigMsg={planned:'📅 МОНТАЖ ЗАПЛАНИРОВАН\n👤 '+c.name+'\n📍 '+(c.addr||'уточните')+(extra?'\n🗓 '+extra:'')+'\nВопросы: +7 920 010-03-21',montage:'🔨 ВЫХОДИМ НА ОБЪЕКТ\n👤 '+c.name+'\n📍 '+(c.addr||'уточните')+'\n📷 Фото ДО начала работ!\nВопросы: +7 920 010-03-21',done:'✅ ОБЪЕКТ ПРИНЯТ\n👤 '+c.name+'\nОтлично! Оплата будет начислена.\n💰 '+(c.sum?fmt(Math.round(c.sum*(1-BRIGADE_COMMISSION/100)))+' ₽':'уточнить')};
 if(brigMsg[s])tg(BRIGADE_CHAT,brigMsg[s]);
-tg(MY_CHAT,'📊 *'+c.name+'*
-'+histText);
+tg(MY_CHAT,'📊 *'+c.name+'*\n'+histText);
 saveClients();renderClient(c);render();
 if(typeof analyzeLeadAI==='function')setTimeout(()=>analyzeLeadAI(c.id),500);
 }
@@ -2082,10 +2006,7 @@ const el=document.getElementById('upsellItems');if(el)el.innerHTML=renderUpsellI
 }
 async function sendUpsellOffer(clientId,service){
 const c=clients.find(x=>x.id===clientId);if(!c)return;
-const msg='👋 *'+c.name+', добрый день!*
-DOC — мы делали у вас работы.
-Хотим предложить: *'+service+'*
-📞 +7 920 010-03-21';
+const msg='👋 *'+c.name+', добрый день!*\nDOC — мы делали у вас работы.\nХотим предложить: *'+service+'*\n📞 +7 920 010-03-21';
 if(c.clientChatId){await clientTg(c.id,msg);toast('✅ Предложение отправлено!');}
 else if(c.phone)window.open('https://wa.me/'+c.phone.replace(/\D/g,'')+'?text='+encodeURIComponent(msg),'_blank');
 else toast('Нет контакта','err');
@@ -2311,16 +2232,7 @@ async function analyzeLeadAI(clientId){
 var c=clients.find(function(x){return x.id===clientId;});if(!c)return;
 var st=STAGES.find(function(s){return s.id===c.stage;})||STAGES[0];
 var signals=(c.paySignals||[]).map(function(s){return {brick:'🧱 кирпич/газобетон',wood:'🪵 дерево/каркас',big:'📐 большой дом 200м²+',village:'🏘 посёлок/КП',busy:'⏰ некогда самому',ref:'🤝 по рекомендации',noprice:'💬 не спросил цену',cheap:'💰 сразу торгуется'}[s]||s;}).join(', ')||'не отмечены';
-var userMsg='=== ЗАМЕТКИ МЕНЕДЖЕРА ===
-'+(c.notes||'нет заметок')+'
-=== ДАННЫЕ ===
-Клиент: '+c.name+'
-Что нужно: '+(c.serviceName||'не уточнили')+'
-Сумма: '+(c.sum?c.sum.toLocaleString('ru')+' ₽':'не указана')+'
-Источник: '+(SRC[c.source]||'')+'
-Ценность: '+({vip:'💎 VIP',regular:'⭐ Постоянный',normal:'🆕 Обычный'}[c.temp]||'🆕 Обычный')+'
-Сигналы: '+signals+'
-Этап: '+st.name;
+var userMsg='=== ЗАМЕТКИ МЕНЕДЖЕРА ===\n'+(c.notes||'нет заметок')+'\n=== ДАННЫЕ ===\nКлиент: '+c.name+'\nЧто нужно: '+(c.serviceName||'не уточнили')+'\nСумма: '+(c.sum?c.sum.toLocaleString('ru')+' ₽':'не указана')+'\nИсточник: '+(SRC[c.source]||'')+'\nЦенность: '+({vip:'💎 VIP',regular:'⭐ Постоянный',normal:'🆕 Обычный'}[c.temp]||'🆕 Обычный')+'\nСигналы: '+signals+'\nЭтап: '+st.name;
 var aiBlock=document.getElementById('aiCardBlock');
 if(aiBlock)aiBlock.innerHTML='<div style="background:var(--bg);border-radius:10px;padding:13px;text-align:center;color:var(--muted);font-size:12px">🤖 Анализирую...</div>';
 try{
